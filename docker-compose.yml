@@ -1,0 +1,123 @@
+services:
+
+  # PostgreSQL 18
+  # NOTE: In v18+, PGDATA changed to /var/lib/postgresql/18/docker
+  # The VOLUME is now /var/lib/postgresql (parent dir)
+
+  postgres:
+    image: postgres:18.3-alpine
+    container_name: shared-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-pharmacy_service}
+      # Explicit PGDATA — no surprises on minor version bumps
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - "127.0.0.1:5432:5432" # Bind to localhost only — never expose DB publicly
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./config/postgres/init:/docker-entrypoint-initdb.d:ro # Optional init scripts
+    networks:
+      - shared-services
+    restart: unless-stopped # Prefer over 'always' — won't auto-restart after intentional stop
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-pharmacy_service}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Give PG time to initialise on first boot
+    deploy:
+      resources:
+        limits:
+          memory: 512M # Tune to your server — prevents OOM from taking down the host
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis 8.6
+  redis:
+    image: redis:8.6.3-alpine
+    container_name: shared-redis
+    command: >
+      redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --protected-mode yes
+    ports:
+      - "127.0.0.1:6379:6379" # Localhost only
+    volumes:
+      - redis_data:/data
+    networks:
+      - shared-services
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 300M # Headroom above maxmemory
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Grafana Alloy v1.16.1
+  # Exposes:
+  #   12345 — Alloy UI / HTTP API (bind to localhost in prod)
+  #   4317  — OTLP gRPC receiver (if used)
+  #   4318  — OTLP HTTP receiver (if used)
+
+  alloy:
+    image: grafana/alloy:v1.16.1
+    container_name: shared-alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --stability.level=generally-available # Skip experimental components
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12345:12345" # Alloy UI — localhost only
+      - "127.0.0.1:4317:4317" # OTLP gRPC — remove if unused
+      - "127.0.0.1:4318:4318" # OTLP HTTP — remove if unused
+    volumes:
+      - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    networks:
+      - shared-services
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:12345/-/ready || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Network — already created externally, referenced here only
+networks:
+  shared-services:
+    external: true
+
+# Volumes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  alloy_data:
+    driver: local
