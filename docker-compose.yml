@@ -51,7 +51,7 @@ services:
       - shared-services
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$REDIS_PASSWORD\" redis-cli ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -72,41 +72,56 @@ services:
   #   4317  — OTLP gRPC receiver (if used)
   #   4318  — OTLP HTTP receiver (if used)
 
-  alloy:
-    image: grafana/alloy:v1.16.1
-    container_name: shared-alloy
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - --stability.level=generally-available # Skip experimental components
-      - /etc/alloy/config.alloy
+  # Mailpit — local email testing
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: shared-mailpit
     ports:
-      - "127.0.0.1:12345:12345" # Alloy UI — localhost only
-      - "127.0.0.1:4317:4317" # OTLP gRPC — remove if unused
-      - "127.0.0.1:4318:4318" # OTLP HTTP — remove if unused
-    volumes:
-      - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - alloy_data:/var/lib/alloy/data
+      - "127.0.0.1:1025:1025" # SMTP — your app sends here
+      - "127.0.0.1:8025:8025" # Web UI — http://localhost:8025
     networks:
       - shared-services
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:12345/-/ready || exit 1" ]
-      interval: 15s
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8025/readyz || exit 1" ]
+      interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 45s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "5m"
+        max-file: "2"
+
+  # Asynqmon — Asynq queue dashboard
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    container_name: shared-asynqmon
+    command:
+      - --redis-addr=redis:6379
+      - --redis-password=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    ports:
+      - "127.0.0.1:8000:8080" # Web UI — http://localhost:8080
+    networks:
+      - shared-services
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 # Network — already created externally, referenced here only
 networks:
@@ -118,6 +133,4 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
-    driver: local
-  alloy_data:
     driver: local
