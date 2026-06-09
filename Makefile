@@ -12,3 +12,6 @@ prod:
 # Spin down all containers, networks, and volumes created by compose
 down:
 	docker compose down
+
+dev-down:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
