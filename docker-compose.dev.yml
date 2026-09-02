@@ -70,8 +70,12 @@ services:
       until (/usr/bin/mc alias set localdev http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}); do echo 'Waiting for minIO API connection...'; sleep 1; done;
       /usr/bin/mc mb --ignore-existing localdev/pharmacy-images;
       /usr/bin/mc mb --ignore-existing localdev/pharmacy-qrcodes;
+      /usr/bin/mc mb --ignore-existing localdev/myhxcare-images;
+      /usr/bin/mc mb --ignore-existing localdev/myhxcare-files;
       /usr/bin/mc anonymous set download localdev/pharmacy-images;
       /usr/bin/mc anonymous set download localdev/pharmacy-qrcodes;
+      /usr/bin/mc anonymous set download localdev/myhxcare-images;
+      /usr/bin/mc anonymous set download localdev/myhxcare-files;
       echo 'MinIO provisioning finished successfully';
       exit 0;
       "
